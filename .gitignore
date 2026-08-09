@@ -1,0 +1,10 @@
+EVALUATION.md
+**/EVALUATION.md
+notes/
+candidates/
+*.local.md
+
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
