@@ -1,0 +1,10 @@
+title: Fundo Take-Home Tests
+description: Engineering take-home assignments
+theme: jekyll-theme-cayman
+
+exclude:
+  - EVALUATION.md
+  - "**/EVALUATION.md"
+  - notes
+  - candidates
+  - README.md
