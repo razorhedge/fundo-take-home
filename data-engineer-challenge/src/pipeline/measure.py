@@ -6,10 +6,12 @@ import json
 import time
 from typing import Any
 
-from .db import source_conn, warehouse_conn
+from .db import source_conn
 from .dedupe import resolve_customers
 from .extract_apply import extract_and_apply
 from .init_warehouse import init_warehouse
+from .config import WAREHOUSE_PATH
+
 
 
 def _source_counts() -> dict[str, int]:
@@ -31,7 +33,6 @@ def _source_counts() -> dict[str, int]:
 
 
 def _reset_warehouse() -> None:
-    from .config import WAREHOUSE_PATH
 
     if WAREHOUSE_PATH.exists():
         WAREHOUSE_PATH.unlink()
@@ -66,13 +67,16 @@ def apply_incremental_source_changes() -> None:
 
 
 def run_measurement() -> dict[str, Any]:
+    """
+    Measure full vs incremental extract volumes and timings.
+    """
     source_counts = _source_counts()
     total_replicated = sum(
         v
         for k, v in source_counts.items()
         if k != "tmp_scratch_imports"
     )
-    # Estimated change rate from the challenge brief
+    # Estimated change rate based on challenge definition
     estimated_change_pct = 1.0
 
     _reset_warehouse()
