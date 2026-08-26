@@ -8,3 +8,12 @@ candidates/
 Thumbs.db
 .idea/
 .vscode/
+
+data-engineer-challenge/data/
+data-engineer-challenge/.venv/
+*.duckdb
+*.duckdb.wal
+__pycache__/
+*.pyc
+.venv/
+venv/
