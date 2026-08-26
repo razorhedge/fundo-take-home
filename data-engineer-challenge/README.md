@@ -1,134 +1,101 @@
-# Take-Home Test: Data Engineer
+# Data Engineer challenge — local demo
 
-## The problem
+Thin local stand-in for “SQL Server → BigQuery”: PostgreSQL source, DuckDB warehouse, Python pipeline. Covers incremental load, customer dedupe, and trust checks.
 
-We move data out of an operational **SQL Server** database into **BigQuery**. Three things hurt today:
+The original brief is preserved in [`CHALLENGE.md`](CHALLENGE.md). Engineering decisions are in [`SOLUTION.md`](SOLUTION.md).
 
-1. **Transfer cost.** We copy the whole database every day to detect a change rate of about 1%.
-2. **Bad operational data.** Duplicate customer records, scratch tables nobody owns, history kept forever.
-3. **No trust.** Nothing tells us whether the warehouse is complete and correct. We find gaps when a number looks wrong on a dashboard.
+## Prerequisites
 
-Build a small local version of this and solve as much of it as you can in working code.
+- Docker with Compose (`docker compose` or `docker-compose`)
+- Python 3.9+
 
-## Scope
+## How to run
 
-**Expected effort: 4–8 hours. You are not expected to implement everything.**
+From this directory:
 
-Choose the problems where you can show the most, and solve those well. We would rather see one part done properly, with the reasoning behind it, than three parts half-finished. What you deliberately skipped — and why — is part of the answer, not a gap in it.
+```bash
+# 1. Start the source database (seeds automatically)
+docker compose up -d
 
-The quality of your decisions matters more than the number of features.
+# 2. Install Python deps and create the DuckDB warehouse schemas
+python3 -m venv .venv
+source .venv/bin/activate
+make setup
 
----
+# 3. Initial extract + dedupe
+make pipeline
 
-## Environment
+# Expected: JSON for extract (row counts per table) and dedupe
+# (survivors, merged_away, conflicts, malformed contact counts).
+```
 
-Everything should run locally with **`docker compose up`** plus at most one extra command. No cloud credentials, no access to our systems, synthetic data only.
+Re-running `make pipeline` with no source changes extracts **0** new rows and leaves the warehouse identical (idempotent).
 
-| Part | What we expect |
+### Trust checks
+
+```bash
+make check
+```
+
+Expected: every check `[PASS]` and `OVERALL: PASS`.
+
+Results are also written to DuckDB table `curated.dq_results`.
+
+### Failing-check demo
+
+```bash
+#  Deletes 10 raw transactions, corrupting the data within the warehouse, and making checks fail.
+make check-fail
+```
+
+Expected: `count_match:transactions` and `pk_diff:transactions` **FAIL**; overall **FAIL**.
+
+```bash
+# Replay extract for the broken table and re-check
+make check-fix
+```
+
+Expected: all checks **PASS** again.
+
+### Measure full vs incremental
+
+```bash
+make measure
+```
+
+Resets the warehouse, runs a full load, applies a small source change (~1% of rows), runs incremental, and writes `data/measurement.json`. Labels in that file mark **measured** vs **estimated** numbers.
+
+## What each Make target does
+
+| Target | What it does |
 |---|---|
-| Source database | Any relational database. **SQL Server is preferred** because it matches our environment; if you pick another, briefly say what you traded off. |
-| Warehouse | Any local stand-in — DuckDB, PostgreSQL, a BigQuery emulator, your choice. |
-| Pipeline | Any language you are fast in. |
+| `make setup` | `pip install -r requirements.txt` + init DuckDB schemas |
+| `make pipeline` | Wait for Postgres → incremental extract/apply → customer resolve |
+| `make pipeline-full` | Same, ignoring watermarks (full raw reload) |
+| `make check` | Source vs warehouse trust checks |
+| `make check-fail` | Break warehouse, run checks (expects failure) |
+| `make check-fix` | Restore via pipeline replay, run checks (expects pass) |
+| `make measure` | Timed full vs incremental measurement |
+| `make clean` | Delete local DuckDB / measurement artifacts |
+| `make reset-db` | `docker compose down -v && up -d` (re-seed) |
 
-We are evaluating data engineering, not database administration.
+## Layout
 
-### What to seed
+```
+docker-compose.yml      # Postgres source
+sql/seed/               # Schema + synthetic data (mounted on first boot)
+src/pipeline/           # extract/apply, dedupe, DQ, measure, break demo
+sql/dq/                 # Check catalog (logic in Python)
+sql/warehouse/          # Layer notes (DDL created in code)
+data/                   # warehouse.duckdb (gitignored)
+```
 
-Keep the volume small — enough to measure something, not enough to slow down a laptop.
+## Clean reset
 
-**Source database**, shaped roughly like ours:
-
-- `Customers` — with duplicates of the same person, a few test accounts (`test@fundo.com` and similar), and some malformed phones and emails
-- `Advances` — referencing customers, with a status marking one as *funded* or *paid off*
-- `Transactions` — the large table, mostly historical, rarely changed after insert
-- `Cards` — payment cards belonging to a customer
-- one append-only history/version table
-- one unused scratch table
-- at least one bad schema choice, such as an identifier stored as unbounded text
-
-At least one duplicate group should contain a customer with a funded or paid-off advance. That is the interesting case.
-
----
-
-## What to solve
-
-### 1. Move only what changed
-
-Load the source into the warehouse incrementally rather than by full copy. It should handle:
-
-- initial load, then incremental
-- inserts, updates, and **deletes**
-- being run twice with the same result
-- recovering from a failure mid-run
-
-Not every table deserves the same strategy. Use more than one, and say why.
-
-### 2. Resolve duplicate customers
-
-Decide which record survives, merge the rest, and stop the same duplicate from being created again.
-
-What matters more than the merge code: **some fields prove identity, others only suggest a possible match.** Treating the second kind as the first merges people who are not the same person. Say which fields you put in each category, and why.
-
-Four rules from the business:
-
-- **A customer with a funded or paid-off advance is untouchable.** It survives and never loses a record that belongs to it. If two customers in a group both have one, do not guess — say what you would do.
-- **Test data is excluded, not merged.** Decide how you identify it, and be careful: the naive pattern catches real people. A surname can be "Testerman", and staff run genuine transactions from company addresses.
-- **Malformed phones and emails** — find them, count them, decide what happens to them. Fixing, flagging, or leaving them alone are all defensible; say which you chose.
-- **Cards belonging to a merged customer** have to end up somewhere. Decide where, and say what breaks if you get it wrong.
-
-### 3. Prove the data is correct
-
-Build checks that answer, without anyone reading code: **is the warehouse complete and correct right now?** Compare the source against the warehouse — completeness, gaps, and rows that should no longer be there.
-
-Then break something on purpose and show the check failing.
-
----
-
-## Deliverables
-
-### The code
-
-Scripts, a Makefile, SQL, migrations — whatever solves the problems you took on. It should run on our machine from a clean checkout.
-
-### `README.md`
-
-- How to run it: copy-paste commands, in order.
-- What each command does and what output to expect.
-- How to run the checks and reproduce the failing-check demo.
-
-Screenshots or a short terminal recording are welcome but optional — we do not evaluate presentation.
-
-### `SOLUTION.md`
-
-Short — two or three pages. Written for an engineering lead who will read it before your code:
-
-- **How you solved each problem you took on**, and which you skipped and why.
-- What you **measured**, with numbers, versus what you **estimated**. Label which is which.
-- Your per-table strategy and the trade-off behind it.
-- Cost impact: what drives the bill today and what changes.
-- Your identity rules: what proves identity, what only suggests it, and how you handled funded customers, test data, malformed contacts and cards.
-
-Close with a short section on **how this would evolve into a production system**:
-
-- Which tools you would choose, and why.
-- What would be a one-time script versus something that runs permanently.
-- What you would deliver first, and why that one.
-
-A few paragraphs is enough.
-
-Your submission will be reviewed by engineers.
-
----
-
-## What we evaluate
-
-- **It runs** from a clean checkout, following your own instructions.
-- **Judgement** — did you measure before deciding? Changing your mind because the data disagreed with you is a good sign, not a bad one.
-- **Reliability** — idempotency, deletes, replay, partial runs.
-- **Simplicity** — the smallest thing that solves it. Over-engineering counts against you.
-- **Clarity** — someone should be able to run and understand your work without you in the room.
-- **Safety** — nothing destructive without a way back.
-
-If something is missing, say so rather than rushing it. An honest gap costs less than a confident guess.
-
-Send us the repository link when you are done.
+```bash
+make clean
+make reset-db
+make setup
+make pipeline
+make check
+```
