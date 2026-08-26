@@ -1,6 +1,4 @@
-"""Shared configuration for the local pipeline."""
-
-from __future__ import annotations
+""" Local pipeline config"""
 
 import os
 from pathlib import Path
