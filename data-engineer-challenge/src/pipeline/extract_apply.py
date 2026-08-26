@@ -146,7 +146,9 @@ def _upsert_raw(con, table: str, columns: list[str], rows: list[tuple]) -> None:
 
 
 def _purge_soft_deleted(con, table: str) -> int:
-    """Remove soft-deleted rows from raw so active warehouse mirrors source actives."""
+    """
+    Remove soft-deleted rows from raw so active warehouse mirrors source actives.
+    """
     before = con.execute(
         f"SELECT COUNT(*) FROM raw.{table} WHERE deleted_at IS NOT NULL"
     ).fetchone()[0]
@@ -173,7 +175,9 @@ def _max_id(rows: list[tuple]) -> str | None:
 
 
 def reconcile_hard_deletes(pg, con) -> dict[str, int]:
-    """Key reconciliation: drop raw rows whose PK no longer exists in source."""
+    """
+    Drop raw rows whose PK no longer exists in source.
+    """
     removed: dict[str, int] = {}
     for table in MUTABLE_TABLES + APPEND_TABLES:
         with pg.cursor() as cur:
@@ -191,6 +195,11 @@ def reconcile_hard_deletes(pg, con) -> dict[str, int]:
 
 
 def extract_and_apply(*, full_refresh: bool = False) -> dict[str, Any]:
+    """
+    Extract and apply data from source to warehouse.
+    Full refresh will delete all existing data in the warehouse.
+    If full refresh is not set, the pipeline will continue from the last successful watermark.
+    """
     init_warehouse()
     run_id = str(uuid.uuid4())
     started = datetime.now(timezone.utc)
